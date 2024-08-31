@@ -1,0 +1,2 @@
+# Ignore files from being uploaded into git repository
+.env
