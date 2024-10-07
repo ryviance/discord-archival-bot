@@ -1,9 +1,10 @@
 import discord
+import os, asyncio
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
 from botHelper import *
-import os, asyncio
+from databaseHelper import init_db, save_archive, retrieve_archive
 
 # Load environment variables from .env file
 load_dotenv()
@@ -13,6 +14,9 @@ TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# Load database
+init_db() 
 
 # Event that triggers when the bot is ready
 @bot.event
@@ -84,39 +88,45 @@ async def archive(interaction: discord.Interaction, name: str):
     def check(m):
         return m.author == interaction.user and m.channel == interaction.channel
 
-    messages = []  # List to store the messages
+    messages = [] 
+    attachments = []
 
     try:
         while True:
             archived_message = await bot.wait_for('message', check=check, timeout=60)  # Wait for a message
 
-            # Check if the user is done
             if archived_message.content.lower() == 'done':
                 break
 
-            # Save the message content
-            messages.append(archived_message)
+            messages.append(archived_message.content)
+            
+            if archived_message.attachments:
+                for attachment in archived_message.attachments:
+                    attachments.append(attachment.url)
 
     except asyncio.TimeoutError:
         await interaction.followup.send("You took too long to respond. Please try the command again.")
         return
 
-    # Prepare to send the archived messages
-    msg_format = ""
-    for msg in messages:
-        if msg.attachments:
-            if msg_format:
-                await send_in_chunks(interaction, msg_format)
-                msg_format = ""
+    # Save messages
+    save_archive(name, messages, attachments)
+    await interaction.followup.send(f"Messages and attachments archived as '{name}'.")
 
-            for attachment in msg.attachments:
-                await interaction.channel.send(attachment.url)  # Send each attachment individually
-        else:
-            msg_format += "\n" + msg.content  # Accumulate regular text messages
+@bot.tree.command(name="retrieve", description="Retrieves an archived message.")
+async def archive(interaction: discord.Interaction, name: str):
+    # Database command
+    content, attachments = retrieve_archive(name)
 
-    # Send any remaining text messages
-    if msg_format:
-        await send_in_chunks(interaction, msg_format)
+    if content is None:
+        await interaction.response.send_message(f"No archive found with the name '{name}'.")
+        return
 
+    # Send archived content
+    await interaction.response.send_message(content)
+
+    # Send each attachment individually
+    for attachment in attachments:
+        await interaction.followup.send(attachment)
+   
 # Run the bot with your token
 bot.run(TOKEN)
